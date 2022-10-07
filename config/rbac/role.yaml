@@ -1,0 +1,33 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - opensearch.k8s.webcenter.fr
+  resources:
+  - opensearches
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - opensearch.k8s.webcenter.fr
+  resources:
+  - opensearches/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - opensearch.k8s.webcenter.fr
+  resources:
+  - opensearches/status
+  verbs:
+  - get
+  - patch
+  - update

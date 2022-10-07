@@ -1,0 +1,6 @@
+apiVersion: opensearch.k8s.webcenter.fr/v1alpha1
+kind: Opensearch
+metadata:
+  name: opensearch-sample
+spec:
+  # TODO(user): Add fields here
