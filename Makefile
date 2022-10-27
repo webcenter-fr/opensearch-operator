@@ -29,7 +29,7 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
 # k8s.webcenter.fr/bootstrap-bundle:$VERSION and k8s.webcenter.fr/bootstrap-catalog:$VERSION.
-IMAGE_TAG_BASE ?= k8s.webcenter.fr/bootstrap
+IMAGE_TAG_BASE ?= quay.io/webcenter/opensearch-operator
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
@@ -47,9 +47,9 @@ ifeq ($(USE_IMAGE_DIGESTS), true)
 endif
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= $(IMAGE_TAG_BASE):$(VERSION)
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.24.2
+ENVTEST_K8S_VERSION = 1.23.x
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -102,8 +102,16 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+test: manifests generate fmt envtest ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./api/... ./pkg/... ./controllers/...  -v -coverprofile cover.out $(TESTARGS) -timeout 600s -v -count 1 -parallel 1
+
+test-acc:
+	go test ./acctests/... -v $(TESTARGS) -timeout 1200s
+
+generate-json-schema:
+	curl -L https://raw.githubusercontent.com/yannh/kubeconform/master/scripts/openapi2jsonschema.py -o bin/openapi2jsonschema.py
+	mkdir -p json-schema
+	docker run --rm -ti -v $(PWD):/src -w /src/json-schema -e http_proxy=$(http_proxy) -e https_proxy=$(https_proxy)  -e FILENAME_FORMAT='{kind}-{group}-{version}' python sh -c "pip install pyyaml && python3 ../bin/openapi2jsonschema.py ../config/crd/bases/*.yaml"
 
 ##@ Build
 
@@ -115,6 +123,12 @@ build: generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go
 
+install-sample: manifests kustomize ## Install samples
+	$(KUSTOMIZE) build config/samples | kubectl apply -f -
+
+uninstall-sample: manifests kustomize ## Uninstall samples
+	$(KUSTOMIZE) build config/samples | kubectl delete -f -
+
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
 	docker build -t ${IMG} .
@@ -122,6 +136,9 @@ docker-build: test ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+docker-buildx: test ## Build docker image with the manager.
+	docker buildx build -t ${IMG} . --push --build-arg http_proxy="$(http_proxy)" --build-arg https_proxy="$(https_proxy)"
 
 ##@ Deployment
 
@@ -192,6 +209,10 @@ bundle-build: ## Build the bundle image.
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.
 	$(MAKE) docker-push IMG=$(BUNDLE_IMG)
+
+.PHONY: bundle-buildx
+bundle-buildx: bundle ## Build the bundle image.
+	docker buildx build -f bundle.Dockerfile -t $(BUNDLE_IMG) . --push --build-arg http_proxy="$(http_proxy)" --build-arg https_proxy="$(https_proxy)"
 
 .PHONY: opm
 OPM = ./bin/opm

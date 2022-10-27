@@ -11,12 +11,12 @@ type ImageSpec struct {
 	// It can be usefull to use internal registry or mirror
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Image *string `json:"image,omitempty"`
+	Image string `json:"image,omitempty"`
 
 	// ImagePullPolicy is the image pull policy to use
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	ImagePullPolicy *corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
 	// ImagePullSecrets is the image pull secrets to use
 	// +operator-sdk:csv:customresourcedefinitions:type=spec

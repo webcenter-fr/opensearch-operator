@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/disaster37/operator-sdk-extra/pkg/controller"
 	"github.com/prometheus/client_golang/prometheus"
@@ -13,6 +14,7 @@ import (
 
 const (
 	opensearchAnnotationKey = "opensearch.k8s.webcenter.fr"
+	requeuedDuration = time.Minute * 1
 )
 
 type Reconciler struct {

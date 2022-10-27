@@ -27,7 +27,7 @@ import (
 
 const (
 	OpensearchTransportTlsCondition = "OpensearchTransportTls"
-	OpensearcgTransportTlsPhase     = "Generate transport TLS"
+	OpensearchTransportTlsPhase     = "Generate transport TLS"
 )
 
 type OpensearchTransportTlsReconciler struct {
@@ -346,6 +346,12 @@ func (r *OpensearchTransportTlsReconciler) generateSecret(opensearch *opensearch
 		Type: corev1.SecretTypeOpaque,
 	}
 
+	// Set owner
+	err = ctrl.SetControllerReference(opensearch, secret, r.Scheme)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error when set as owner reference")
+	}
+
 	// Generate new PKI
 	rootCA, err := pki.NewRootCATransport(r.log)
 	if err != nil {
@@ -401,6 +407,12 @@ func (r *OpensearchTransportTlsReconciler) renewSecret(opensearch *opensearchapi
 			Namespace: opensearch.Namespace,
 		},
 		Type: corev1.SecretTypeOpaque,
+	}
+
+	// Set owner
+	err = ctrl.SetControllerReference(opensearch, secret, r.Scheme)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error when set as owner reference")
 	}
 
 	oldCaCerts := make([]*x509.Certificate, 0)

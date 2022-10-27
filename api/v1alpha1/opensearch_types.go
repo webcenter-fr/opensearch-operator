@@ -33,13 +33,13 @@ type OpensearchSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	*shared.ImageSpec `json:",inline,omitempty"`
+	shared.ImageSpec `json:"inline,omitempty"`
 
 	// Version is the Opensearch version to use
 	// Default is use the latest
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Version *string `json:"version,omitempty"`
+	Version string `json:"version,omitempty"`
 
 	// SetVMMaxMapCount permit to set the right value for VMMaxMapCount on node
 	// It need to run pod as root with privileged option
@@ -54,21 +54,22 @@ type OpensearchSpec struct {
 	// +optional
 	PluginsList []string `json:"pluginsList,omitempty"`
 
-	// GlobalOpensearchConfig permit to merge this with all node group specific Opensearch config
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	// +optional
-	GlobalOpensearchConfig map[string]string `json:"globalOpensearchConfig,omitempty"`
-
 	// GlobalNodeGroup permit to set some default parameters for each node groups
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	GlobalNodeGroup *GlobalNodeGroupSpec `json:"globalNodeGroup,omitempty"`
+	GlobalNodeGroup GlobalNodeGroupSpec `json:"globalNodeGroup,omitempty"`
 
 	// NodeGroups permit to groups node per use case
 	// For exemple master, data and ingest
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
 	NodeGroups []NodeGroupSpec `json:"nodeGroups,omitempty"`
+
+	// Endpoint permit to set endpoints to access on Opensearch from external kubernetes
+	// You can set ingress and / or load balancer
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	// +optional
+	Endpoint *EndpointSpec `json:"endpoint,omitempty"`
 }
 
 type EndpointSpec struct {
@@ -88,12 +89,12 @@ type LoadBalancerSpec struct {
 	// Cloud provider need to support it
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled,omitempty"`
 
 	// TargetNodeGroupName permit to define if specific node group is responsible to receive external access, like ingest nodes
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	TargetNodeGroupName *string `json:"targetNodeGroupName,omitempty"`
+	TargetNodeGroupName string `json:"targetNodeGroupName,omitempty"`
 
 	// Tls permit to set TLS endpoint spec
 	Tls *TlsSpec `json:"tls,omitempty"`
@@ -110,20 +111,20 @@ type TlsSpec struct {
 	// It need to have the following keys: tls.key, tls.crt and optionally ca.crt
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	CertificateSecretRef *string `json:"certificateSecretRef,omitempty"`
+	CertificateSecretRef string `json:"certificateSecretRef,omitempty"`
 }
 
 type SelfSignedCertificateSpec struct {
 
-	// Enabled permit to enabled / disabled self signed certificates
+	// AltIps permit to set subject alt names of type ip when generate certificate
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
+	AltIps []string `json:"altIPs:,omitempty"`
 
-	// SubjectAltNames permit to set subject alt names when generate certificate
+	// AltNames permit to set subject alt names of type dns when generate certificate
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	SubjectAltNames []string `json:"subjectAltNames:,omitempty"`
+	AltNames []string `json:"altNames:,omitempty"`
 }
 
 type IngressSpec struct {
@@ -131,12 +132,12 @@ type IngressSpec struct {
 	// Enabled permit to enabled / disabled ingress
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled,omitempty"`
 
 	// TargetNodeGroupName permit to define if specific node group is responsible to receive external access, like ingest nodes
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	TargetNodeGroupName *string `json:"targetNodeGroupName,omitempty"`
+	TargetNodeGroupName string `json:"targetNodeGroupName,omitempty"`
 
 	// Host is the hostname to access on Opensearch
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -145,7 +146,7 @@ type IngressSpec struct {
 	// SecretRef is the secret ref that store certificates
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	SecretRef *string `json:"secretRef,omitempty"`
+	SecretRef string `json:"secretRef,omitempty"`
 
 	// Labels to set in ingress
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -169,18 +170,7 @@ type GlobalNodeGroupSpec struct {
 	// Default is empty
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	AdditionalVolumes []corev1.Volume `json:"additionalVolumes,omitempty"`
-
-	// AdditionalVolumeMounts permit to mount additionnal volumes on pods
-	// Default is empty
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	// +optional
-	AdditionalVolumeMounts []corev1.VolumeMount `json:"additionalVolumeMounts,omitempty"`
-
-	// Persistence is the spec to persist data
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	// +optional
-	Persistence *PersistenceSpec `json:"persistence,omitempty"`
+	AdditionalVolumes []*VolumeSpec `json:"additionalVolumes,omitempty"`
 
 	// AntiAffinity permit to set anti affinity policy
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -190,29 +180,33 @@ type GlobalNodeGroupSpec struct {
 	// PodDisruptionBudget is the pod disruption budget policy
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	PodDisruptionBudget *policyv1.PodDisruptionBudget `json:"podDisruptionBudget,omitempty"`
+	PodDisruptionBudgetSpec *policyv1.PodDisruptionBudgetSpec `json:"podDisruptionBudget,omitempty"`
 
 	// InitContainerResources permit to set resources on init containers
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
 	InitContainerResources *corev1.ResourceRequirements `json:"initContainerResources,omitempty"`
 
-	// PodSpec is merged with expected pod
+	// PodTemplate is merged with expected pod
 	// It usefull to add some extra properties on pod spec
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	PodSpec *corev1.PodSpec `json:"podSpec,omitempty"`
+	PodTemplate *corev1.PodTemplateSpec `json:"podTemplate,omitempty"`
 
-	// Jvm permit to set extra option on JVM like proxy to download plugins
-	// Not set Xmx or Xms. It's automatically computed from Opensearch container resources
+	// Jvm permit to set extra option on JVM like memory or proxy to download plugins
+	// Becarefull with memory, not forget to set the right ressource on pod
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Jvm *string `json:"jvm,omitempty"`
+	Jvm string `json:"jvm,omitempty"`
 
 	// Config is the Opensearch config dedicated for this node groups like roles
+	// The key is the file stored on opensearch/config
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
+
+	// SecurityRef is the secret that store the security settings
+	SecurityRef string `json:"securityRef,omitempty"`
 
 	// Labels permit to set labels on containers
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -243,7 +237,11 @@ type NodeGroupSpec struct {
 
 	// Replicas is the number of replicas
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	Replicas int64 `json:"replicas,omitempty"`
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Roles is the list of Opensearch roles
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	Roles []string `json:"roles,omitempty"`
 
 	// Persistence is the spec to persist data
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -260,21 +258,20 @@ type NodeGroupSpec struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// InitContainerResources permit to set resources on init containers
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	// +optional
-	InitContainerResources *corev1.ResourceRequirements `json:"initContainerResources,omitempty"`
-
 	// Jvm permit to set extra option on JVM like proxy to download plugins
 	// Not set Xmx or Xms. It's automatically computed from Opensearch container resources
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	Jvm *string `json:"jvm,omitempty"`
+	Jvm string `json:"jvm,omitempty"`
 
-	// Config is the Opensearch config dedicated for this node groups like roles
+	// Config is the Opensearch config dedicated for this node groups
+	// The key is the file stored on opensearch/config
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
+
+	// SecurityRef is the secret that store the security settings
+	SecurityRef string `json:"securityRef,omitempty"`
 
 	// Tolerations permit to set toleration on pod
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -310,27 +307,47 @@ type NodeGroupSpec struct {
 	// It usefull to add some extra properties on pod spec
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	PodSpec *corev1.PodSpec `json:"podSpec,omitempty"`
+	PodTemplate *corev1.PodTemplateSpec `json:"podSpec,omitempty"`
+
+	// PodDisruptionBudget is the pod disruption budget policy
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	// +optional
+	PodDisruptionBudgetSpec *policyv1.PodDisruptionBudgetSpec `json:"podDisruptionBudget,omitempty"`
 }
 
 type PersistenceSpec struct {
 	// VolumeClaim is the persistent volume claim spec use by statefullset
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	// +optional
-	VolumeClaim *corev1.PersistentVolumeClaim `json:"volumeClaim,omitempty"`
+	VolumeClaimSpec *corev1.PersistentVolumeClaimSpec `json:"volumeClaim,omitempty"`
 
-	// Volume is the volume to use instead volumeClaim
+	// Volume is the volume source to use instead volumeClaim
 	// It usefull if you should to use hostPath
 	// +optional
-	Volume *corev1.Volume `json:"volume,omitempty"`
+	Volume *corev1.VolumeSource `json:"volume,omitempty"`
+}
+
+type VolumeSpec struct {
+
+	// Name is the volume name
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	Name string `json:"name,omitempty"`
+
+	corev1.VolumeMount `json:"inline,omitempty"`
+
+	corev1.VolumeSource `json:"inline,omitempty"`
 }
 
 type AntiAffinitySpec struct {
-	// Enabled permit to enabled / disabled anti affinity policy
-	Enabled *bool `json:"enabled,omitempty"`
 
 	// Type permit to set anti affinity as soft or hard
-	Type *string `json:"type,omitempty"`
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	Type string `json:"type,omitempty"`
+
+	// TopologyKey is the topology key to use
+	// Default to topology.kubernetes.io/zone
+	// +optional
+	TopologyKey string `json:"topologyKey,omitempty"`
 }
 
 // OpensearchStatus defines the observed state of Opensearch
@@ -381,3 +398,5 @@ type OpensearchList struct {
 func init() {
 	SchemeBuilder.Register(&Opensearch{}, &OpensearchList{})
 }
+
+
