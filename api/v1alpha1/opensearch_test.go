@@ -5,6 +5,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
+	"github.com/webcenter-fr/opensearch-operator/pkg/test"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -2024,7 +2025,9 @@ func TestGenerateStatefullset(t *testing.T) {
 
 	sts, err = o.GenerateStatefullsets()
 
-	spew.Print(toYaml(sts[1]))
+	spew.Print(toYaml(sts[2]))
 	assert.NoError(t, err)
-	assert.Fail(t, "test")
+	test.EqualFromYamlFile(t, "../../fixture/api/os-statefullset-master.yml", sts[0])
+	test.EqualFromYamlFile(t, "../../fixture/api/os-statefullset-data.yml", sts[1])
+	test.EqualFromYamlFile(t, "../../fixture/api/os-statefullset-client.yml", sts[2])
 }
