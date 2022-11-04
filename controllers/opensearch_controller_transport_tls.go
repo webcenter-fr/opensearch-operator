@@ -62,9 +62,9 @@ func (r *OpensearchTransportTlsReconciler) Read(ctx context.Context, resource cl
 	nodeCertificates := map[string]*x509.Certificate{}
 
 	// Read existing secret
-	if err = r.Client.Get(ctx, types.NamespacedName{Namespace: opensearch.Namespace, Name: r.GetName(opensearch.Name)}, s); err != nil {
+	if err = r.Client.Get(ctx, types.NamespacedName{Namespace: opensearch.Namespace, Name: opensearch.GetSecretNameForTlsTransport()}, s); err != nil {
 		if !k8serrors.IsNotFound(err) {
-			return res, errors.Wrapf(err, "Error when read existing secret %s", r.GetName(opensearch.Name))
+			return res, errors.Wrapf(err, "Error when read existing secret %s", opensearch.GetSecretNameForTlsTransport())
 		}
 		s = nil
 	}
@@ -84,18 +84,15 @@ func (r *OpensearchTransportTlsReconciler) Read(ctx context.Context, resource cl
 		}
 
 		// Load node certificates
-		for _, nodeGroup := range opensearch.Spec.NodeGroups {
-			for i := 0; i < int(nodeGroup.Replicas); i++ {
-				nodeName := GetNodeName(opensearch.Name, nodeGroup.Name, i)
-				if s.Data[fmt.Sprintf("%s.crt", nodeName)] != nil {
-					nodeCrt, err := cert.LoadCertFromPem(s.Data[fmt.Sprintf("%s.crt", nodeName)])
-					if err != nil {
-						return res, errors.Wrapf(err, "Error when load node certificate %s", nodeName)
-					}
-					nodeCertificates[nodeName] = nodeCrt
-				} else {
-					nodeCertificates[nodeName] = nil
+		for _, nodeName := range opensearch.GetNodeNames() {
+			if s.Data[fmt.Sprintf("%s.crt", nodeName)] != nil {
+				nodeCrt, err := cert.LoadCertFromPem(s.Data[fmt.Sprintf("%s.crt", nodeName)])
+				if err != nil {
+					return res, errors.Wrapf(err, "Error when load node certificate %s", nodeName)
 				}
+				nodeCertificates[nodeName] = nodeCrt
+			} else {
+				nodeCertificates[nodeName] = nil
 			}
 		}
 	}
@@ -157,6 +154,7 @@ func (r *OpensearchTransportTlsReconciler) Diff(resource client.Object, data map
 	opensearch := resource.(*opensearchapi.Opensearch)
 	var d any
 	var sb strings.Builder
+	secretName := opensearch.GetSecretNameForTlsTransport()
 
 	d, err = helper.Get(data, "currentSecret")
 	if err != nil {
@@ -194,7 +192,7 @@ func (r *OpensearchTransportTlsReconciler) Diff(resource client.Object, data map
 
 		expectedSecret, err := r.generateSecret(opensearch)
 		if err != nil {
-			return diff, errors.Wrapf(err, "Error when generate secret %s for TLS transport", r.GetName(opensearch.Name))
+			return diff, errors.Wrapf(err, "Error when generate secret %s for TLS transport", secretName)
 		}
 		data["expectedSecret"] = expectedSecret
 
@@ -212,7 +210,7 @@ func (r *OpensearchTransportTlsReconciler) Diff(resource client.Object, data map
 	if needRenew {
 		expectedSecret, err := r.renewSecret(opensearch, currentSecret.Data["admin.pfx"])
 		if err != nil {
-			return diff, errors.Wrapf(err, "Error when generate secret %s for TLS transport", r.GetName(opensearch.Name))
+			return diff, errors.Wrapf(err, "Error when generate secret %s for TLS transport", secretName)
 		}
 		data["expectedSecret"] = expectedSecret
 		diff.NeedUpdate = true
@@ -226,6 +224,7 @@ func (r *OpensearchTransportTlsReconciler) Diff(resource client.Object, data map
 	// Check if node certificates must be renewed or created
 	for nodeName, nodeCrt := range nodeCertificates {
 		if nodeCrt == nil {
+			// Create new node certificate, new node
 			nc, err := pki.NewNodeTLS(nodeName, rootCA, r.log)
 			if err != nil {
 				return diff, errors.Wrapf(err, "Error when create node certificate %s", nodeName)
@@ -246,7 +245,7 @@ func (r *OpensearchTransportTlsReconciler) Diff(resource client.Object, data map
 			// If one expired, we regenerate all certificates to be simple
 			expectedSecret, err := r.renewSecret(opensearch, currentSecret.Data["admin.pfx"])
 			if err != nil {
-				return diff, errors.Wrapf(err, "Error when generate secret %s for TLS transport", r.GetName(opensearch.Name))
+				return diff, errors.Wrapf(err, "Error when generate secret %s for TLS transport", secretName)
 			}
 			data["expectedSecret"] = expectedSecret
 			diff.NeedUpdate = true
@@ -311,11 +310,11 @@ func (r *OpensearchTransportTlsReconciler) OnSuccess(ctx context.Context, resour
 	opensearch := resource.(*opensearchapi.Opensearch)
 
 	if diff.NeedCreate {
-		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully created", r.GetName(opensearch.Name))
+		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully created", opensearch.GetSecretNameForTlsTransport())
 	}
 
 	if diff.NeedUpdate {
-		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully updated", r.GetName(opensearch.Name))
+		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully updated", opensearch.GetSecretNameForTlsTransport())
 	}
 
 	// Update condition status if needed
@@ -324,23 +323,19 @@ func (r *OpensearchTransportTlsReconciler) OnSuccess(ctx context.Context, resour
 			Type:    OpensearchTransportTlsCondition,
 			Reason:  "Success",
 			Status:  metav1.ConditionTrue,
-			Message: fmt.Sprintf("Secret %s update to date", r.GetName(opensearch.Name)),
+			Message: fmt.Sprintf("Secret %s up to date", opensearch.GetSecretNameForTlsTransport()),
 		})
 	}
 
 	return nil
 }
 
-// GetName permit to retrun secret name that store all TLS for transport layer
-func (r *OpensearchTransportTlsReconciler) GetName(clusterName string) string {
-	return fmt.Sprintf("opensearch-%s-transport-tls", clusterName)
-}
 
 // generateSecret generate the secret with all certificate needed by transport layout
 func (r *OpensearchTransportTlsReconciler) generateSecret(opensearch *opensearchapi.Opensearch) (secret *corev1.Secret, err error) {
 	secret = &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.GetName(opensearch.Name),
+			Name:      opensearch.GetSecretNameForTlsTransport(),
 			Namespace: opensearch.Namespace,
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -377,10 +372,8 @@ func (r *OpensearchTransportTlsReconciler) generateSecret(opensearch *opensearch
 	secret.Data["admin.pfx"] = pkcs12
 
 	// Generate nodes certificates
-	for _, nodeGroup := range opensearch.Spec.NodeGroups {
-		for i := 0; i < int(nodeGroup.Replicas); i++ {
-			nodeName := GetNodeName(opensearch.Name, nodeGroup.Name, i)
-			nodeCrt, err := pki.NewNodeTLS(nodeName, rootCA, r.log)
+	for _, nodeName := range opensearch.GetNodeNames() {
+		nodeCrt, err := pki.NewNodeTLS(nodeName, rootCA, r.log)
 			if err != nil {
 				return nil, errors.Wrapf(err, "Error when generate node certificate for %s", nodeName)
 			}
@@ -392,7 +385,6 @@ func (r *OpensearchTransportTlsReconciler) generateSecret(opensearch *opensearch
 				return nil, errors.Wrapf(err, "Error when generate Pkcs12 for node %s", nodeName)
 			}
 			secret.Data[fmt.Sprintf("%s.pfx", nodeName)] = pkcs12
-		}
 	}
 
 	return secret, nil
@@ -403,7 +395,7 @@ func (r *OpensearchTransportTlsReconciler) generateSecret(opensearch *opensearch
 func (r *OpensearchTransportTlsReconciler) renewSecret(opensearch *opensearchapi.Opensearch, oldPfx []byte) (secret *corev1.Secret, err error) {
 	secret = &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.GetName(opensearch.Name),
+			Name:      opensearch.GetSecretNameForTlsTransport(),
 			Namespace: opensearch.Namespace,
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -451,23 +443,19 @@ func (r *OpensearchTransportTlsReconciler) renewSecret(opensearch *opensearchapi
 	}
 	secret.Data["admin.pfx"] = pkcs12
 
-	// Generate nodes certificates
-	for _, nodeGroup := range opensearch.Spec.NodeGroups {
-		for i := 0; i < int(nodeGroup.Replicas); i++ {
-			nodeName := GetNodeName(opensearch.Name, nodeGroup.Name, i)
-			nodeCrt, err := pki.NewNodeTLS(nodeName, rootCA, r.log)
+	for _, nodeName := range opensearch.GetNodeNames() {
+		nodeCrt, err := pki.NewNodeTLS(nodeName, rootCA, r.log)
 			if err != nil {
 				return nil, errors.Wrapf(err, "Error when generate node certificate for %s", nodeName)
 			}
 			secret.Data[fmt.Sprintf("%s.crt", nodeName)] = []byte(nodeCrt.Certificate)
 			secret.Data[fmt.Sprintf("%s.key", nodeName)] = []byte(nodeCrt.PrivateKey)
 			secret.Data[fmt.Sprintf("%s.csr", nodeName)] = []byte(nodeCrt.CSR)
-			pkcs12, err := goca.GeneratePkcs12(nodeCrt, "", oldCaCerts...)
+			pkcs12, err := goca.GeneratePkcs12(nodeCrt, "")
 			if err != nil {
 				return nil, errors.Wrapf(err, "Error when generate Pkcs12 for node %s", nodeName)
 			}
 			secret.Data[fmt.Sprintf("%s.pfx", nodeName)] = pkcs12
-		}
 	}
 
 	return secret, nil

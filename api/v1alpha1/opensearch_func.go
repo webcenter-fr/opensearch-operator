@@ -182,13 +182,23 @@ func (h *Opensearch) GenerateIngress() (ingress *networkingv1.Ingress, err error
 		targetService = h.GetNodeGroupServiceName(h.Spec.Endpoint.Ingress.TargetNodeGroupName)
 	}
 
+	labels := funk.UnionStringMap(h.Spec.Endpoint.Ingress.Labels, h.Labels)
+	if len(labels) == 0 {
+		labels = nil
+	}
+	annotations := funk.UnionStringMap(defaultAnnotations, h.Spec.Endpoint.Ingress.Annotations, h.Annotations)
+	if len(annotations) == 0 {
+		annotations = nil
+	}
+
+
 
 	ingress = &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: h.Namespace,
 			Name: h.Name,
-			Labels: funk.UnionStringMap(h.Spec.Endpoint.Ingress.Labels, h.Labels),
-			Annotations: funk.UnionStringMap(defaultAnnotations, h.Spec.Endpoint.Ingress.Annotations, h.Annotations),
+			Labels: labels,
+			Annotations: annotations,
 		},
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{
@@ -671,15 +681,14 @@ func (h *Opensearch) GenerateStatefullsets() (statefullsets []*appv1.StatefulSet
 
 		// Add specific command to handle plugin installation
 		var pluginInstallation strings.Builder
-		pluginInstallation.WriteString(`
-#!/usr/bin/env bash
+		pluginInstallation.WriteString(`#!/usr/bin/env bash
 set -euo pipefail
 
 `)	
 		for _, plugin :=  range h.Spec.PluginsList {
 			pluginInstallation.WriteString(fmt.Sprintf("./bin/opensearch-plugin install -b %s\n", plugin))
 		}
-		pluginInstallation.WriteString("bash opensearch-docker-entrypoint.sh")
+		pluginInstallation.WriteString("bash opensearch-docker-entrypoint.sh\n")
 		cb.Container().Command = []string{
 			"sh",
 			"-c",
@@ -715,82 +724,13 @@ set -euo pipefail
 
 
 		// compute anti affinity
-		if h.Spec.GlobalNodeGroup.AntiAffinity != nil {
-			antiAffinity := corev1.PodAntiAffinity{}
-			topologyKey := "kubernetes.io/hostname"
-			if h.Spec.GlobalNodeGroup.AntiAffinity.TopologyKey != "" {
-				topologyKey = h.Spec.GlobalNodeGroup.AntiAffinity.TopologyKey
-			}
-			if h.Spec.GlobalNodeGroup.AntiAffinity.Type == "hard" {
-				antiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{
-					{
-						TopologyKey: topologyKey,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"cluster": h.Name,
-								"nodeGroup": nodeGroup.Name,
-							},
-						},
-					},
-				}
-			} else {
-				antiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.WeightedPodAffinityTerm{
-					{
-						Weight: 10,
-						PodAffinityTerm: corev1.PodAffinityTerm{
-							TopologyKey: topologyKey,
-							LabelSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"cluster": h.Name,
-									"nodeGroup": nodeGroup.Name,
-								},
-							},
-						},
-					},
-				}
-			}
-			ptb.WithAffinity(corev1.Affinity{
-				PodAntiAffinity: &antiAffinity,
-			}, k8sbuilder.Merge)
+		antiAffinity, err := h.computeAntiAffinity(&nodeGroup)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Error when compute anti affinity for %s", nodeGroup.Name)
 		}
-		if nodeGroup.AntiAffinity != nil {
-			antiAffinity := corev1.PodAntiAffinity{}
-			topologyKey := "kubernetes.io/hostname"
-			if nodeGroup.AntiAffinity.TopologyKey != "" {
-				topologyKey = nodeGroup.AntiAffinity.TopologyKey
-			}
-			if nodeGroup.AntiAffinity.Type == "hard" {
-				antiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{
-					{
-						TopologyKey: topologyKey,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"cluster": h.Name,
-								"nodeGroup": nodeGroup.Name,
-							},
-						},
-					},
-				}
-			} else {
-				antiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.WeightedPodAffinityTerm{
-					{
-						Weight: 10,
-						PodAffinityTerm: corev1.PodAffinityTerm{
-							TopologyKey: topologyKey,
-							LabelSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"cluster": h.Name,
-									"nodeGroup": nodeGroup.Name,
-								},
-							},
-						},
-					},
-				}
-			}
-			ptb.WithAffinity(corev1.Affinity{
-				PodAntiAffinity: &antiAffinity,
-			}, k8sbuilder.Merge)
-		}
+		ptb.WithAffinity(corev1.Affinity{
+			PodAntiAffinity: antiAffinity,
+		}, k8sbuilder.Merge)
 
 		// Compute containers
 		ptb.WithContainers([]corev1.Container{*cb.Container()}, k8sbuilder.Merge)

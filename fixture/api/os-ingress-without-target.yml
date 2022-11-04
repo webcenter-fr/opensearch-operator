@@ -1,0 +1,22 @@
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  creationTimestamp: null
+  name: test
+  namespace: default
+spec:
+  rules:
+  - host: my-test.cluster.local
+    http:
+      paths:
+      - backend:
+          service:
+            name: test-os
+            port:
+              number: 9200
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - my-test.cluster.local

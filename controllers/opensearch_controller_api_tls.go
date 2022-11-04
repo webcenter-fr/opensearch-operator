@@ -1,6 +1,6 @@
 package controllers
 
-/*
+
 import (
 	"context"
 	"crypto/x509"
@@ -59,24 +59,20 @@ func (r *OpensearchApiTlsReconciler) Read(ctx context.Context, resource client.O
 	var apiCrt *x509.Certificate
 
 	// Read existing secret
-	secretName := r.GetName(opensearch.Name)
-	isSecretRef :=  false
-	if opensearch.Spec.Endpoint != nil && opensearch.Spec.Endpoint.LoadBalancer != nil && opensearch.Spec.Endpoint.LoadBalancer.Enabled && opensearch.Spec.Endpoint.LoadBalancer.Tls != nil && len(*opensearch.Spec.Endpoint.LoadBalancer.Tls.CertificateSecretRef) > 0 {
-		secretName = *opensearch.Spec.Endpoint.LoadBalancer.Tls.CertificateSecretRef
-		isSecretRef = true
-	}
+	secretName := opensearch.GetSecretNameForTlsApi()
 	if err = r.Client.Get(ctx, types.NamespacedName{Namespace: opensearch.Namespace, Name: secretName}, s); err != nil {
 		if !k8serrors.IsNotFound(err) {
 			return res, errors.Wrapf(err, "Error when read existing secret %s", secretName)
 		}
-		if isSecretRef {
+		if !opensearch.IsSelfManagedSecretForTlsApi() {
 			r.log.Warnf("The secret %s not yet exist, Retry in few time", secretName)
 			return ctrl.Result{RequeueAfter: requeuedDuration}, nil
 		}
 		s = nil
 	}
 
-	if s != nil && !isSecretRef {
+	// Existing secret with self managed
+	if s != nil && opensearch.IsSelfManagedSecretForTlsApi() {
 
 		// Load root CA
 		rootCA, err = pki.LoadRootCAApi(s.Data["ca.key"], s.Data["ca.pub"], s.Data["ca.crt"], s.Data["ca.crl"], r.log)
@@ -95,18 +91,18 @@ func (r *OpensearchApiTlsReconciler) Read(ctx context.Context, resource client.O
 		data["apiCertificate"] = apiCrt
 	}
 
-	if s != nil && isSecretRef {
+	// Existing secret without self managed
+	if s != nil && !opensearch.IsSelfManagedSecretForTlsApi() {
 		if len(s.Data["key.tls"]) == 0 {
-			r.log.Warn("The secret %s not contend key.tls, Retry in few time", secretName)
+			r.log.Warnf("The secret %s not contend key.tls, Retry in few time", secretName)
 			return ctrl.Result{RequeueAfter: requeuedDuration}, nil
 		}
 		if len(s.Data["tls.crt"]) == 0 {
-			r.log.Warn("The secret %s not contend key.crt, Retry in few time", secretName)
+			r.log.Warnf("The secret %s not contend key.crt, Retry in few time", secretName)
 			return ctrl.Result{RequeueAfter: requeuedDuration}, nil
 		}
 	}
 
-	data["isSecretRef"] = isSecretRef
 	data["currentSecret"] = s
 
 	return res, nil
@@ -169,13 +165,16 @@ func (r *OpensearchApiTlsReconciler) Diff(resource client.Object, data map[strin
 	}
 	currentSecret := d.(*corev1.Secret)
 
-	d, err = helper.Get(data, "isSecretRef")
-	if err != nil {
-		return diff, err
-	}
-	isSecretRef := d.(bool)
 
-	if !isSecretRef {
+	diff = controller.Diff{
+		NeedCreate: false,
+		NeedUpdate: false,
+	}
+
+	// Do somethink only if operator manage API certificate
+	if opensearch.IsSelfManagedSecretForTlsApi() {
+
+		// Load pki and current certificate
 		d, err = helper.Get(data, "rootCA")
 		if err != nil {
 			return diff, err
@@ -187,32 +186,23 @@ func (r *OpensearchApiTlsReconciler) Diff(resource client.Object, data map[strin
 			return diff, err
 		}
 		apiCrt = d.(*x509.Certificate)
-	}
 
-
-	diff = controller.Diff{
-		NeedCreate: false,
-		NeedUpdate: false,
-	}
-
-	// Create new secret
-	if currentSecret == nil && !isSecretRef {
-		diff.NeedCreate = true
-		diff.Diff = "Secret not exist"
-
-		expectedSecret, err := r.generateSecret(opensearch)
-		if err != nil {
-			return diff, errors.Wrapf(err, "Error when generate secret %s for TLS Api", r.GetName(opensearch.Name))
+		// Create new secret if not yet exist
+		if currentSecret == nil {
+			diff.NeedCreate = true
+			diff.Diff = "Secret not exist"
+	
+			expectedSecret, err := r.generateSecret(opensearch)
+			if err != nil {
+				return diff, errors.Wrapf(err, "Error when generate secret %s for TLS Api", opensearch.GetSecretNameForTlsApi())
+			}
+			data["expectedSecret"] = expectedSecret
+	
+			r.log.Info("Create PKI for Api layer")
+	
+			return diff, nil
 		}
-		data["expectedSecret"] = expectedSecret
 
-		r.log.Info("Create PKI for Api layer")
-
-		return diff, nil
-	}
-
-	// Handle existing secret when self signed certificate
-	if !isSecretRef {
 		// Check if CA need to be renewed or Api certificate
 		needRenewCA, err := pki.NeedRenewCertificate(rootCA.GoCertificate(), r.log)
 		if err != nil {
@@ -225,7 +215,7 @@ func (r *OpensearchApiTlsReconciler) Diff(resource client.Object, data map[strin
 		if needRenewCA || needRenewApiCertificate {
 			expectedSecret, err := r.generateSecret(opensearch)
 			if err != nil {
-				return diff, errors.Wrapf(err, "Error when generate secret %s for TLS Api", r.GetName(opensearch.Name))
+				return diff, errors.Wrapf(err, "Error when generate secret %s for TLS Api", opensearch.GetSecretNameForTlsApi())
 			}
 			data["expectedSecret"] = expectedSecret
 			diff.NeedUpdate = true
@@ -263,11 +253,11 @@ func (r *OpensearchApiTlsReconciler) OnSuccess(ctx context.Context, resource cli
 	opensearch := resource.(*opensearchapi.Opensearch)
 
 	if diff.NeedCreate {
-		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully created", r.GetName(opensearch.Name))
+		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully created", opensearch.GetSecretNameForTlsApi())
 	}
 
 	if diff.NeedUpdate {
-		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully updated", r.GetName(opensearch.Name))
+		r.recorder.Eventf(resource, corev1.EventTypeNormal, "Completed", "Secret %s successfully updated", opensearch.GetSecretNameForTlsApi())
 	}
 
 	// Update condition status if needed
@@ -276,23 +266,20 @@ func (r *OpensearchApiTlsReconciler) OnSuccess(ctx context.Context, resource cli
 			Type:    OpensearchApiTlsCondition,
 			Reason:  "Success",
 			Status:  metav1.ConditionTrue,
-			Message: fmt.Sprintf("Secret %s update to date", r.GetName(opensearch.Name)),
+			Message: fmt.Sprintf("Secret %s up to date", opensearch.GetSecretNameForTlsApi()),
 		})
 	}
 
 	return nil
 }
 
-// GetName permit to retrun secret name that store all TLS for transport layer
-func (r *OpensearchApiTlsReconciler) GetName(clusterName string) string {
-	return fmt.Sprintf("opensearch-%s-api-tls", clusterName)
-}
+
 
 // generateSecret generate the secret with all certificate needed by Api layout
 func (r *OpensearchApiTlsReconciler) generateSecret(opensearch *opensearchapi.Opensearch) (secret *corev1.Secret, err error) {
 	secret = &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.GetName(opensearch.Name),
+			Name:      opensearch.GetSecretNameForTlsApi(),
 			Namespace: opensearch.Namespace,
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -316,10 +303,12 @@ func (r *OpensearchApiTlsReconciler) generateSecret(opensearch *opensearchapi.Op
 
 	// Genereate Api cert
 	var altnames []string
-	if opensearch.Spec.Endpoint != nil && opensearch.Spec.Endpoint.LoadBalancer != nil && opensearch.Spec.Endpoint.LoadBalancer.Enabled && opensearch.Spec.Endpoint.LoadBalancer.Tls != nil && opensearch.Spec.Endpoint.LoadBalancer.Tls.SelfSignedCertificate != nil && opensearch.Spec.Endpoint.LoadBalancer.Tls.SelfSignedCertificate.Enabled {
-		altnames = opensearch.Spec.Endpoint.LoadBalancer.Tls.SelfSignedCertificate.SubjectAltNames
+	var altips []string
+	if opensearch.IsLoadBalancerEnabled() && opensearch.Spec.Endpoint.LoadBalancer.Tls != nil && opensearch.Spec.Endpoint.LoadBalancer.Tls.SelfSignedCertificate != nil  {
+		altnames = opensearch.Spec.Endpoint.LoadBalancer.Tls.SelfSignedCertificate.AltNames
+		altips = opensearch.Spec.Endpoint.LoadBalancer.Tls.SelfSignedCertificate.AltIps
 	}
-	apiCrt, err := pki.NewApiTls(opensearch.Name, altnames, nil, rootCA, r.log)
+	apiCrt, err := pki.NewApiTls(opensearch.Name, altnames, altips, rootCA, r.log)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error when generate Api certificate")
 	}
@@ -334,4 +323,3 @@ func (r *OpensearchApiTlsReconciler) generateSecret(opensearch *opensearchapi.Op
 
 	return secret, nil
 }
-*/

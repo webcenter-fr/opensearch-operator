@@ -1,0 +1,35 @@
+metadata:
+  annotations:
+    anno1: value1
+  creationTimestamp: null
+  labels:
+    label1: value1
+  name: test-master-os-config
+  namespace: default
+data:
+  log4j.yml: |
+    log.test: test
+  opensearch.yml: |
+    key:
+        value: fake
+    node:
+        name: test
+        roles:
+            - master
+        value: test
+        value2: test2
+    plugins:
+        security:
+            ssl:
+                http:
+                    enabled: true
+                    keystore_filepath: certs/http/api.pfx
+                    keystore_type: PKCS12/PFX
+                    truststore_filepath: certs/http/api.pfx
+                    truststore_type: PKCS12/PFX
+                transport:
+                    enforce_hostname_verification: true
+                    keystore_filepath: certs/transport/${hostname}.pfx
+                    keystore_type: PKCS12/PFX
+                    truststore_filepath: certs/transport/${hostanme}.pfx
+                    truststore_type: PKCS12/PFX

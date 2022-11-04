@@ -1,0 +1,29 @@
+metadata:
+  annotations:
+    annotationLabel: annotationLabel
+    globalAnnotation: globalAnnotation
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  creationTimestamp: null
+  labels:
+    globalLabel: globalLabel
+    ingressLabel: ingressLabel
+  name: test
+  namespace: default
+spec:
+  ingressClassName: toto
+  rules:
+  - host: my-test.cluster.local
+    http:
+      paths:
+      - backend:
+          service:
+            name: test-master-os
+            port:
+              number: 9200
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - my-test.cluster.local
+    secretName: my-secret

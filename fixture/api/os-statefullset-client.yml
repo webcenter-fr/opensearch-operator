@@ -28,8 +28,7 @@ spec:
       - command:
         - sh
         - -c
-        - |2-
-
+        - |
           #!/usr/bin/env bash
           set -euo pipefail
 

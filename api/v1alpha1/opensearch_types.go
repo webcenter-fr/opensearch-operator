@@ -33,7 +33,7 @@ type OpensearchSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	shared.ImageSpec `json:"inline,omitempty"`
+	shared.ImageSpec `json:",inline"`
 
 	// Version is the Opensearch version to use
 	// Default is use the latest
@@ -333,9 +333,9 @@ type VolumeSpec struct {
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	Name string `json:"name,omitempty"`
 
-	corev1.VolumeMount `json:"inline,omitempty"`
+	corev1.VolumeMount `json:",inline"`
 
-	corev1.VolumeSource `json:"inline,omitempty"`
+	corev1.VolumeSource `json:",inline"`
 }
 
 type AntiAffinitySpec struct {

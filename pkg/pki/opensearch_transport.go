@@ -32,7 +32,7 @@ func NewRootCATransport(log *logrus.Entry) (ca *goca.CA, err error) {
 func LoadRootCATransport(privateKeyPem []byte, publicKeyPem []byte, certPem []byte, crlPem []byte, log *logrus.Entry) (ca *goca.CA, err error) {
 
 	if privateKeyPem == nil || publicKeyPem == nil || certPem == nil || crlPem == nil {
-		errors.New("You need to provide valide privateKey, publicKey, cert, crl contend")
+		return nil, errors.New("You need to provide valide privateKey, publicKey, cert, crl contend")
 	}
 
 	log.Debug("Load root CA for transport layer")
